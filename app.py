@@ -206,12 +206,11 @@ if uploaded_file is not None:
 
     with col1:
 
-        st.image(
-            image,
-            caption="Uploaded Image",
-            use_container_width=True
-        )
-
+       st.image(
+    image,
+    caption="Uploaded Image",
+    width=400
+)
     img=np.array(image)
 
     img=cv2.resize(img,(128,128))
