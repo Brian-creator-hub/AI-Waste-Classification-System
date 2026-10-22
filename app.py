@@ -1,314 +1,257 @@
-import streamlit as st
-import tensorflow as tf
-import numpy as np
-import cv2
-from PIL import Image
 
-# -------------------------------------------------
+import streamlit as st
+import numpy as np
+import tensorflow as tf
+from PIL import Image
+import pandas as pd
+from pathlib import Path
+
+# --------------------------------------------------
 # PAGE CONFIGURATION
-# -------------------------------------------------
+# --------------------------------------------------
+
 st.set_page_config(
     page_title="AI Waste Classification System",
     page_icon="♻️",
     layout="wide"
 )
 
-# -------------------------------------------------
-# CUSTOM CSS
-# -------------------------------------------------
-st.markdown("""
-<style>
+# --------------------------------------------------
+# WASTE CATEGORIES
+# Keep this order consistent with your training data.
+# --------------------------------------------------
 
-.main{
-    background-color:#f5f7fa;
-}
-
-.title{
-    text-align:center;
-    color:#2E8B57;
-    font-size:42px;
-    font-weight:bold;
-}
-
-.subtitle{
-    text-align:center;
-    color:gray;
-    font-size:18px;
-}
-
-.prediction-box{
-    background:#e8f5e9;
-    border-radius:15px;
-    padding:20px;
-    text-align:center;
-    box-shadow:2px 2px 8px rgba(0,0,0,0.2);
-}
-
-.footer{
-    text-align:center;
-    color:gray;
-    font-size:14px;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# -------------------------------------------------
-# LOAD MODEL
-# -------------------------------------------------
-@st.cache_resource
-def load_model():
-    return tf.keras.models.load_model(
-        "waste_classifier_model.keras",
-        compile=False
-    )
-
-model = load_model()
-
-# -------------------------------------------------
-# CLASS NAMES
-# -------------------------------------------------
-classes = [
+CLASS_NAMES = [
     "Hazardous",
     "Non-Recyclable",
     "Organic",
     "Recyclable"
 ]
 
-icons = {
-    "Hazardous":"☣️",
-    "Non-Recyclable":"🗑️",
-    "Organic":"🌿",
-    "Recyclable":"♻️"
+DISPOSAL_GUIDANCE = {
+    "Hazardous": (
+        "Handle with care. Keep this waste separate from ordinary rubbish. "
+        "Use an appropriate hazardous-waste collection or disposal service."
+    ),
+    "Non-Recyclable": (
+        "Place this waste in the appropriate general-waste bin, following "
+        "your local waste collection guidelines."
+    ),
+    "Organic": (
+        "Where facilities are available, place this waste in an organic-waste "
+        "bin or use it for composting."
+    ),
+    "Recyclable": (
+        "Keep this item separate from general waste. If appropriate, clean it "
+        "and place it in a recycling collection bin."
+    )
 }
 
-tips = {
+MODEL_PATH = Path(__file__).parent / "waste_classifier_model.keras"
 
-"Hazardous":
-"""
-Dispose only at authorized hazardous waste collection centres.
+# --------------------------------------------------
+# LOAD TRAINED MODEL
+# --------------------------------------------------
 
-Examples:
+@st.cache_resource
+def load_waste_model():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {MODEL_PATH.name}. "
+            "Place the model file in the same folder as app.py."
+        )
 
-• Batteries
+    return tf.keras.models.load_model(MODEL_PATH)
 
-• Chemicals
 
-• Paint
+# --------------------------------------------------
+# IMAGE PREPROCESSING
+# Images are resized to 128 x 128 and normalized to [0, 1].
+# This matches the preprocessing described for your model.
+# --------------------------------------------------
 
-• Medical waste
-""",
+def preprocess_image(image):
+    image = image.convert("RGB")
+    image = image.resize((128, 128))
 
-"Non-Recyclable":
-"""
-Dispose responsibly using normal waste bins.
+    image_array = np.array(image, dtype=np.float32)
+    image_array = image_array / 255.0
 
-Examples:
+    image_array = np.expand_dims(image_array, axis=0)
 
-• Dirty plastics
+    return image_array
 
-• Diapers
 
-• Styrofoam
-""",
+# --------------------------------------------------
+# APPLICATION HEADER
+# --------------------------------------------------
 
-"Organic":
-"""
-Organic waste can be composted.
+st.title("♻️ AI-Based Waste Classification System")
 
-Examples:
-
-• Food leftovers
-
-• Fruits
-
-• Vegetables
-
-• Leaves
-""",
-
-"Recyclable":
-"""
-Place inside recycling bins.
-
-Examples:
-
-• Plastic bottles
-
-• Paper
-
-• Glass
-
-• Metal cans
-"""
-
-}
-
-# -------------------------------------------------
-# SIDEBAR
-# -------------------------------------------------
-
-st.sidebar.title("♻️ AI Waste Classifier")
-
-st.sidebar.success("Model")
-
-st.sidebar.write("MobileNetV2")
-
-st.sidebar.markdown("---")
-
-st.sidebar.subheader("Waste Categories")
-
-st.sidebar.write("🌿 Organic")
-
-st.sidebar.write("♻️ Recyclable")
-
-st.sidebar.write("🗑️ Non-Recyclable")
-
-st.sidebar.write("☣️ Hazardous")
-
-st.sidebar.markdown("---")
-
-st.sidebar.info(
-"""
-Upload any waste image and the AI
-will predict its category.
-"""
+st.write(
+    "This system uses a trained deep-learning model to classify waste "
+    "images into four categories and provide disposal guidance."
 )
 
-# -------------------------------------------------
-# TITLE
-# -------------------------------------------------
-
-st.markdown(
-'<p class="title">♻️ AI Waste Classification System</p>',
-unsafe_allow_html=True
+st.info(
+    "For the best result, use a clear picture showing one waste item "
+    "with good lighting."
 )
 
-st.markdown(
-'<p class="subtitle">Upload an image to classify waste using Artificial Intelligence</p>',
-unsafe_allow_html=True
+st.divider()
+
+# --------------------------------------------------
+# IMAGE SOURCE SELECTION
+# --------------------------------------------------
+
+st.subheader("Choose an Image")
+
+image_source = st.radio(
+    "How would you like to provide the waste image?",
+    ["Upload Waste Image", "Take a Picture"],
+    horizontal=True
 )
 
-uploaded_file = st.file_uploader(
-"Upload Waste Image",
-type=["jpg","jpeg","png"]
-)
+uploaded_file = None
 
-# -------------------------------------------------
-# PREDICTION
-# -------------------------------------------------
+if image_source == "Upload Waste Image":
+    uploaded_file = st.file_uploader(
+        "Choose an image from your device",
+        type=["jpg", "jpeg", "png"],
+        help="Supported formats: JPG, JPEG and PNG."
+    )
+
+else:
+    uploaded_file = st.camera_input(
+        "Take a picture of the waste",
+        help="Allow camera access if your browser requests permission."
+    )
+
+# --------------------------------------------------
+# CLASSIFICATION
+# --------------------------------------------------
 
 if uploaded_file is not None:
 
-    image = Image.open(uploaded_file).convert("RGB")
+    try:
+        image = Image.open(uploaded_file).convert("RGB")
 
-    col1,col2 = st.columns(2)
+        st.subheader("Selected Waste Image")
 
-    with col1:
-
-       st.image(
-    image,
-    caption="Uploaded Image",
-    width=400
-)
-    img=np.array(image)
-
-    img=cv2.resize(img,(128,128))
-
-    img=img.astype("float32")/255.0
-
-    img=np.expand_dims(img,axis=0)
-
-    with st.spinner("AI is analyzing image..."):
-
-        prediction=model.predict(img)
-
-    predicted=np.argmax(prediction)
-
-    confidence=float(np.max(prediction)*100)
-
-    waste=classes[predicted]
-
-    with col2:
-
-        st.markdown(
-        f"""
-        <div class="prediction-box">
-
-        <h1>{icons[waste]}</h1>
-
-        <h2>{waste}</h2>
-
-        </div>
-
-        """,
-        unsafe_allow_html=True
+        st.image(
+            image,
+            caption="Image provided for classification",
+            use_column_width=True
         )
 
-        st.metric(
-            "Confidence",
-            f"{confidence:.2f}%"
+        if st.button("Classify Waste", type="primary"):
+
+            with st.spinner("Analysing image... Please wait."):
+
+                model = load_waste_model()
+
+                processed_image = preprocess_image(image)
+
+                predictions = model.predict(
+                    processed_image,
+                    verbose=0
+                )
+
+                probabilities = np.asarray(predictions)[0].reshape(-1)
+
+                if len(probabilities) != len(CLASS_NAMES):
+                    st.error(
+                        "The model output does not contain four classes. "
+                        "Check your model's output layer and the class order "
+                        "used during training."
+                    )
+                    st.stop()
+
+                predicted_index = int(np.argmax(probabilities))
+                predicted_class = CLASS_NAMES[predicted_index]
+                confidence = float(probabilities[predicted_index]) * 100
+
+            # ------------------------------------------
+            # DISPLAY PREDICTION
+            # ------------------------------------------
+
+            st.divider()
+            st.subheader("Classification Result")
+
+            result_col, confidence_col = st.columns(2)
+
+            with result_col:
+                st.metric(
+                    label="Predicted Waste Category",
+                    value=predicted_class
+                )
+
+            with confidence_col:
+                st.metric(
+                    label="Model Confidence",
+                    value=f"{confidence:.2f}%"
+                )
+
+            st.subheader("Disposal Recommendation")
+
+            st.success(DISPOSAL_GUIDANCE[predicted_class])
+
+            # ------------------------------------------
+            # DISPLAY CLASS PROBABILITIES
+            # ------------------------------------------
+
+            st.subheader("Prediction Probabilities")
+
+            probability_data = pd.DataFrame({
+                "Waste Category": CLASS_NAMES,
+                "Probability (%)": probabilities * 100
+            })
+
+            probability_data = probability_data.sort_values(
+                by="Probability (%)",
+                ascending=False
+            )
+
+            st.bar_chart(
+                probability_data.set_index("Waste Category")
+            )
+
+            st.dataframe(
+                probability_data.style.format({
+                    "Probability (%)": "{:.2f}%"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.caption(
+                "Confidence is the model's prediction score, not a guarantee "
+                "that the classification is correct. Verify hazardous items "
+                "carefully and follow local disposal regulations."
+            )
+
+    except FileNotFoundError as error:
+        st.error(str(error))
+
+    except Exception as error:
+        st.error(
+            "The image could not be classified. Check that the model file "
+            "is valid and that the required Python packages are installed."
         )
+        st.exception(error)
 
-        st.progress(confidence/100)
+else:
+    st.info(
+        "Upload an image or take a picture to begin waste classification."
+    )
 
-        if confidence>=90:
-
-            st.success("Very High Confidence")
-
-        elif confidence>=70:
-
-            st.info("High Confidence")
-
-        elif confidence>=50:
-
-            st.warning("Moderate Confidence")
-
-        else:
-
-            st.error("Low Confidence")
-
-    st.markdown("---")
-
-    st.subheader("Prediction Probabilities")
-
-    for i,name in enumerate(classes):
-
-        st.write(name)
-
-        st.progress(float(prediction[0][i]))
-
-        st.write(f"{prediction[0][i]*100:.2f}%")
-
-    st.markdown("---")
-
-    st.subheader("♻️ Disposal Recommendation")
-
-    st.info(tips[waste])
-
-# -------------------------------------------------
+# --------------------------------------------------
 # FOOTER
-# -------------------------------------------------
+# --------------------------------------------------
 
-st.markdown("---")
+st.divider()
 
-st.markdown(
-"""
-### Technologies Used
-
-- TensorFlow
-- MobileNetV2
-- Streamlit
-- OpenCV
-- NumPy
-- Pillow
-
----
-
-Developed by **Brian Berur**
-
-Mount Kenya University
-
-2026
-"""
+st.caption(
+    "AI-Based Waste Classification System | "
+    "Deep Learning Project"
 )
